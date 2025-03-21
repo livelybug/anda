@@ -152,7 +152,7 @@ async fn main() -> Result<(), BoxError> {
                     },),
                 )
                 .await?;
-            println!("{:?}", res);
+            println!("\n{}\n", res.content);
         }
 
         Some(Commands::ToolCall {

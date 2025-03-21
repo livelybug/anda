@@ -107,7 +107,24 @@ impl Agent<AgentCtx> for ICPLedgerAgent {
             ..Default::default()
         }
         .context("user_address".to_string(), caller.to_string());
-        let res = ctx.completion(req, None).await?;
+        let mut res = ctx.completion(req, None).await?;
+
+        // Perform a chat completion request to summarize the agent's action history
+        if let Some(full_history) = &res.full_history {
+            let summarize_assistant = "You are an assistant whose task is to provide a very concise summary of the conversation history with AI agent.\
+                You should consider the user's intent or question, then extract the information from all the tools used, all the tools' replies, and all the responses during the conversation, \
+                and output a very consolidated, concise answer for the user.\n".to_string();
+            let joint = "Please refer to below for the conversation history:\n-------------------\n".to_string();
+            let full_history_string = serde_json::to_string(full_history).unwrap();
+            let summarize_assistant = summarize_assistant + &joint + &full_history_string;
+            
+            let req = CompletionRequest {   
+                system: Some(summarize_assistant.to_string()),
+                ..Default::default()
+            };
+            res = ctx.completion(req, None).await?;
+        }
+
         Ok(res)
     }
 }

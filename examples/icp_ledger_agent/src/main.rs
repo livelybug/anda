@@ -2,7 +2,7 @@ use anda_core::BoxError;
 use anda_engine::{
     context::Web3SDK,
     engine::EngineBuilder,
-    model::{Model, openai, xai},
+    model::{Model, openai, xai, deepseek},
     store::{InMemory, Store},
 };
 use anda_engine_server::{ServerBuilder, shutdown_signal};
@@ -134,6 +134,11 @@ async fn main() -> Result<(), BoxError> {
     } else if !cli.xai_api_key.is_empty() {
         Arc::new(
             xai::Client::new(&cli.xai_api_key, Some(cli.model_endpoint))
+                .completion_model(&cli.model_name),
+        )
+    } else if !cli.deepseek_api_key.is_empty() {
+        Arc::new(
+            deepseek::Client::new(&cli.deepseek_api_key, Some(cli.model_endpoint))
                 .completion_model(&cli.model_name),
         )
     } else {

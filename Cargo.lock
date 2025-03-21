@@ -3814,6 +3814,8 @@ dependencies = [
  "const-hex",
  "dotenv",
  "log",
+ "serde",
+ "serde_json",
  "structured-logger",
  "tokio",
  "tokio-util",
