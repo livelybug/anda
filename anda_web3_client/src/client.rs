@@ -33,13 +33,13 @@ use anda_engine::APP_USER_AGENT;
 /// with different configurations for secure communication.
 #[derive(Clone)]
 pub struct Client {
-    outer_http: reqwest::Client,
+    outer_http: reqwest::Client, // Common
     root_secret: [u8; 48],
     id: Principal,
     identity: Arc<dyn Identity>,
     agent: Arc<Agent>,
     cose_canister: Principal,
-    allow_http: bool,
+    allow_http: bool, // Common
 }
 
 /// Builder for creating a new Client with custom configuration
@@ -48,8 +48,8 @@ pub struct ClientBuilder {
     root_secret: [u8; 48],
     identity: Arc<dyn Identity>,
     cose_canister: Principal,
-    outer_http: reqwest::Client,
-    allow_http: bool,
+    outer_http: reqwest::Client, // Common
+    allow_http: bool, // Common
 }
 
 /// Returns a new Ed25519 identity from a 32-byte secret
