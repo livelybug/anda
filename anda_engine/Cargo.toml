@@ -35,6 +35,7 @@ toml = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 url = { workspace = true }
+alloy = { workspace = true }
 
 [dev-dependencies]
 dotenv = { workspace = true }

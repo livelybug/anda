@@ -3,18 +3,19 @@
 //! This module provides functionality for querying account balances on the ICP network.
 //! It implements the [`Tool`] trait to enable AI agents to interact with ICP ledgers.
 
-use anda_core::{BoxError, FunctionDefinition, Resource, Tool, ToolOutput, gen_schema_for};
-use anda_engine::context::BaseCtx;
+use anda_core::{BoxError, FunctionDefinition, Resource, ToolOutput, gen_schema_for};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use alloy::providers::Provider;
+use eyre::Result;
 
-use super::ICPLedgers;
+use super::{BSCLedgers, ERC20STD};
 
 /// Arguments for the balance of an account for a token
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct BalanceOfArgs {
+pub(crate) struct BalanceOfArgs {  // TODO: if to merge with the same struct in icp
     /// ICP account address (principal) to query, e.g. "77ibd-jp5kr-moeco-kgoar-rro5v-5tng4-krif5-5h2i6-osf2f-2sjtv-kqe"
     pub account: String,
     /// Token symbol, e.g. "ICP"
@@ -24,14 +25,14 @@ pub struct BalanceOfArgs {
 /// ICP Ledger BalanceOf tool implementation
 #[derive(Debug, Clone)]
 pub struct BalanceOfTool {
-    ledgers: Arc<ICPLedgers>,
+    ledgers: Arc<BSCLedgers>,
     schema: Value,
 }
 
 impl BalanceOfTool {
-    pub const NAME: &'static str = "icp_ledger_balance_of";
+    pub const NAME: &'static str = "bsc_ledger_balance_of";
     /// Creates a new BalanceOfTool instance
-    pub fn new(ledgers: Arc<ICPLedgers>) -> Self {
+    pub fn new(ledgers: Arc<BSCLedgers>) -> Self {
         let schema = gen_schema_for::<BalanceOfArgs>();
 
         BalanceOfTool {
@@ -43,9 +44,7 @@ impl BalanceOfTool {
 
 /// Implementation of the [`Tool`]` trait for BalanceOfTool
 /// Enables AI Agent to query the balance of an account for a ICP token
-impl Tool<BaseCtx> for BalanceOfTool {
-    type Args = BalanceOfArgs;
-    type Output = f64;
+impl BalanceOfTool {
 
     fn name(&self) -> String {
         Self::NAME.to_string()
@@ -59,7 +58,7 @@ impl Tool<BaseCtx> for BalanceOfTool {
             .map(|k| k.as_str())
             .collect::<Vec<_>>();
         format!(
-            "Query the balance of the specified account on ICP blockchain for the following tokens: {}",
+            "Query the balance of the specified account on BSC blockchain for the following tokens: {}",
             tokens.join(", ")
         )
     }
@@ -75,11 +74,11 @@ impl Tool<BaseCtx> for BalanceOfTool {
 
     async fn call(
         &self,
-        ctx: BaseCtx,
-        data: Self::Args,
+        ctx: &impl Provider,
+        data: BalanceOfArgs,
         _resources: Option<Vec<Resource>>,
-    ) -> Result<ToolOutput<Self::Output>, BoxError> {
-        let (_, amount) = self.ledgers.balance_of(&ctx, data).await?;
+    ) -> Result<ToolOutput<String>, BoxError> {
+        let (_, amount) = self.ledgers.balance_of(ctx, data).await?;
         Ok(ToolOutput::new(amount))
     }
 }
@@ -87,55 +86,53 @@ impl Tool<BaseCtx> for BalanceOfTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use candid::Principal;
     use std::collections::BTreeMap;
-
+    use alloy::primitives::address;
+    use alloy::providers::ProviderBuilder;
+    
     #[tokio::test(flavor = "current_thread")]
-    async fn test_icp_ledger_transfer() {
-        let panda_ledger = Principal::from_text("druyg-tyaaa-aaaaq-aactq-cai").unwrap();
-        let ledgers = ICPLedgers {
+    async fn test_bsc_ledger_balance() {
+        // Create a provider with the HTTP transport using the `reqwest` crate.
+        let rpc_url = "https://bsc-testnet.bnbchain.org".parse().unwrap();
+        let provider = ProviderBuilder::new().on_http(rpc_url);
+        let token_addr = address!("0xDE3a190D9D26A8271Ae9C27573c03094A8A2c449");
+        let contract = ERC20STD::new(token_addr, provider.clone());
+
+        // Get token symbol.
+        let symbol = contract.symbol().call().await.unwrap()._0;
+
+        // Create two users, token dev and Bob.
+        let token_dev = address!("0xA8c4AAE4ce759072D933bD4a51172257622eF128");
+        let bob = address!("0xd69BddCf538da91f66EE165C6244f59122C1Ff52");
+
+        let dev_before_balance = contract.balanceOf(token_dev).call().await.unwrap()._0;
+        let bob_before_balance = contract.balanceOf(bob).call().await.unwrap()._0;
+        println!("dev_before_balance: {:?}", dev_before_balance);
+        println!("bob_before_balance: {:?}", bob_before_balance);
+
+        let ledgers = BSCLedgers {
             ledgers: BTreeMap::from([
                 (
-                    String::from("ICP"),
+                    symbol.clone(),
                     (
-                        Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+                        token_addr,
                         8,
                     ),
                 ),
-                (String::from("PANDA"), (panda_ledger, 8)),
-            ]),
-            from_user_subaccount: true,
+            ])
         };
-        let ledgers = Arc::new(ledgers);
-        let tool = BalanceOfTool::new(ledgers.clone());
+        let tool = BalanceOfTool::new(Arc::new(ledgers));
         let definition = tool.definition();
-        assert_eq!(definition.name, "icp_ledger_balance_of");
-        let s = serde_json::to_string_pretty(&definition).unwrap();
-        println!("{}", s);
-        // {
-        //     "name": "icp_ledger_balance_of",
-        //     "description": "Query the balance of the specified account on ICP blockchain for the following tokens: ICP, PANDA",
-        //     "parameters": {
-        //       "additionalProperties": false,
-        //       "description": "Arguments for the balance of an account for a token",
-        //       "properties": {
-        //         "account": {
-        //           "description": "ICP account address (principal) to query, e.g. \"77ibd-jp5kr-moeco-kgoar-rro5v-5tng4-krif5-5h2i6-osf2f-2sjtv-kqe\"",
-        //           "type": "string"
-        //         },
-        //         "symbol": {
-        //           "description": "Token symbol, e.g. \"ICP\"",
-        //           "type": "string"
-        //         }
-        //       },
-        //       "required": [
-        //         "account",
-        //         "symbol"
-        //       ],
-        //       "title": "BalanceOfArgs",
-        //       "type": "object"
-        //     },
-        //     "strict": true
-        // }
+        assert_eq!(definition.name, "bsc_ledger_balance_of");
+        assert_eq!(tool.description().contains(&symbol), true);
+
+        let balance_query = BalanceOfArgs {
+            account: token_dev.to_string(),
+            symbol: symbol.clone(),
+        };
+
+        let balance_tool = tool.call(&provider, balance_query, None).await.unwrap();
+        assert_eq!(balance_tool.output, dev_before_balance.to_string());
+        
     }
 }

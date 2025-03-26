@@ -67,6 +67,48 @@ pub struct BaseCtx {
     store: Store,
 }
 
+/*
+#[derive(Clone)]
+pub struct BaseCtxCommon {
+    pub(crate) start_at: Instant,
+    pub(crate) depth: u8,
+    pub(crate) web3: Arc<Web3SDK>,
+    pub(crate) remote: Arc<RemoteEngines>,
+    pub(crate) meta: RequestMeta,
+    cache: Arc<CacheService>,
+    store: Store,
+}
+
+#[derive(Clone)]
+pub struct BaseCtxBsc {
+    pub(crate) id: Address,
+    pub(crate) name: String,
+    pub(crate) caller: Address,
+    pub(crate) common: BaseCtxCommon,
+}
+
+#[derive(Clone)]
+pub struct BaseCtxIcp {
+    pub(crate) id: Principal,
+    pub(crate) name: String,
+    pub(crate) caller: Principal,
+    pub(crate) path: Path,
+    pub(crate) cancellation_token: CancellationToken,
+    pub(crate) common: BaseCtxCommon,
+}
+
+pub enum BaseCtx {
+    ICP(BaseCtxIcp),
+    BSC(BaseCtxBsc),
+}
+
+// Define an enum to specify the blockchain type
+pub enum ChainType {
+    ICP,
+    BSC,
+}
+*/
+
 /// Base context [`BaseContext`] implementation providing core functionality for the engine.
 ///
 /// This struct serves as the foundation for all operations in the system,

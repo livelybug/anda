@@ -8,16 +8,20 @@
 //! - Atomic transfers with proper error handling
 
 use anda_core::{
-    BoxError, FunctionDefinition, Resource, StateFeatures, Tool, ToolOutput, gen_schema_for,
+    BoxError, FunctionDefinition, Resource, ToolOutput, gen_schema_for,
 };
 use anda_engine::context::BaseCtx;
-use num_traits::cast::ToPrimitive;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
-use super::ICPLedgers;
+use super::{BSCLedgers, ERC20STD};
+
+use alloy::{
+    primitives::Address, 
+    providers::Provider, 
+};
 
 /// Arguments for transferring tokens to an account
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -27,20 +31,20 @@ pub struct TransferToArgs {
     /// Token symbol, e.g. "ICP"
     pub symbol: String,
     /// Token amount, e.g. 1.1 ICP
-    pub amount: f64,
+    pub amount: String,
 }
 
 /// Implementation of the ICP Ledger Transfer tool
 #[derive(Debug, Clone)]
 pub struct TransferTool {
-    ledgers: Arc<ICPLedgers>,
+    ledgers: Arc<BSCLedgers>,
     schema: Value,
 }
 
 impl TransferTool {
-    pub const NAME: &'static str = "icp_ledger_transfer";
+    pub const NAME: &'static str = "bsc_ledger_transfer";
 
-    pub fn new(ledgers: Arc<ICPLedgers>) -> Self {
+    pub fn new(ledgers: Arc<BSCLedgers>) -> Self {
         let schema = gen_schema_for::<TransferToArgs>();
 
         TransferTool { ledgers, schema }
@@ -49,9 +53,7 @@ impl TransferTool {
 
 /// Implementation of the [`Tool`] trait for TransferTool
 /// Enables AI Agent to perform ICP token transfers
-impl Tool<BaseCtx> for TransferTool {
-    type Args = TransferToArgs;
-    type Output = String;
+impl TransferTool {
 
     fn name(&self) -> String {
         Self::NAME.to_string()
@@ -88,15 +90,16 @@ impl Tool<BaseCtx> for TransferTool {
 
     async fn call(
         &self,
-        ctx: BaseCtx,
-        data: Self::Args,
+        ctx: &impl Provider,
+        me: Address,
+        data: TransferToArgs,
         _resources: Option<Vec<Resource>>,
-    ) -> Result<ToolOutput<Self::Output>, BoxError> {
-        let (ledger, tx) = self.ledgers.transfer(&ctx, ctx.id(), data).await?;
+    ) -> Result<ToolOutput<String>, BoxError> {
+        let (ledger, tx) = self.ledgers.transfer(ctx, me, data).await.unwrap();
         Ok(ToolOutput::new(format!(
             "Successful, transaction ID: {}, detail: https://www.icexplorer.io/token/details/{}",
-            tx.0.to_u64().unwrap_or(0),
-            ledger.to_text()
+            tx,
+            ledger.to_string()
         )))
     }
 }
@@ -104,95 +107,72 @@ impl Tool<BaseCtx> for TransferTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anda_engine::context::mock;
-    use candid::{Nat, Principal, decode_args, encode_args};
-    use icrc_ledger_types::icrc1::{
-        account::principal_to_subaccount,
-        transfer::{TransferArg, TransferError},
-    };
     use std::collections::BTreeMap;
+    use alloy::{
+        providers::ProviderBuilder,
+        primitives::U256,
+    };
 
     #[tokio::test(flavor = "current_thread")]
-    async fn test_icp_ledger_transfer() {
-        let panda_ledger = Principal::from_text("druyg-tyaaa-aaaaq-aactq-cai").unwrap();
-        let ledgers = ICPLedgers {
+    async fn test_bsc_ledger_transfer() {
+        let rpc_url = "https://bsc-testnet.bnbchain.org";
+        // Anvil for simulation.
+        let provider =
+        ProviderBuilder::new().on_anvil_with_wallet_and_config(|anvil| anvil.fork(rpc_url)).unwrap();
+
+        let accounts = provider.get_accounts().await.unwrap();
+        let alice = accounts[0];
+        let bob = accounts[1];
+    
+        let contract = ERC20STD::deploy(provider.clone()).await.unwrap();
+
+        // Get token symbol.
+        let symbol = contract.symbol().call().await.unwrap()._0;
+        let token_addr = contract.address();
+
+        // Register the balances of Alice and Bob before the transfer.
+        let alice_before_balance = contract.balanceOf(alice).call().await.unwrap()._0;
+        let bob_before_balance = contract.balanceOf(bob).call().await.unwrap()._0;
+        // println!("alice_before_balance: {:?}", alice_before_balance);
+        // println!("bob_before_balance: {:?}", bob_before_balance);
+
+        let ledgers = BSCLedgers {
             ledgers: BTreeMap::from([
                 (
-                    String::from("ICP"),
+                    symbol.clone(),
                     (
-                        Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+                        *token_addr,
                         8,
                     ),
                 ),
-                (String::from("PANDA"), (panda_ledger, 8)),
-            ]),
-            from_user_subaccount: true,
+            ])
         };
-        let ledgers = Arc::new(ledgers);
-        let tool = TransferTool::new(ledgers.clone());
+
+        let tool = TransferTool::new(Arc::new(ledgers));
         let definition = tool.definition();
-        assert_eq!(definition.name, "icp_ledger_transfer");
-        let s = serde_json::to_string_pretty(&definition).unwrap();
-        println!("{}", s);
-        // {
-        //     "name": "icp_ledger_transfer",
-        //     "description": "Transfer ICP, PANDA tokens to the specified account on ICP blockchain.",
-        //     "parameters": {
-        //       "additionalProperties": false,
-        //       "description": "Arguments for transferring tokens to an account",
-        //       "properties": {
-        //         "account": {
-        //           "description": "ICP account address (principal) to receive token, e.g. \"77ibd-jp5kr-moeco-kgoar-rro5v-5tng4-krif5-5h2i6-osf2f-2sjtv-kqe\"",
-        //           "type": "string"
-        //         },
-        //         "amount": {
-        //           "description": "Token amount, e.g. 1.1 ICP",
-        //           "type": "number"
-        //         },
-        //         "symbol": {
-        //           "description": "Token symbol, e.g. \"ICP\"",
-        //           "type": "string"
-        //         }
-        //       },
-        //       "required": [
-        //         "account",
-        //         "amount",
-        //         "symbol"
-        //       ],
-        //       "title": "TransferToArgs",
-        //       "type": "object"
-        //     },
-        //     "strict": true
-        // }
+        assert_eq!(definition.name, "bsc_ledger_transfer");
+        assert_eq!(tool.description().contains(&symbol), true);
 
-        let args = TransferToArgs {
-            account: Principal::anonymous().to_string(),
-            symbol: "PANDA".to_string(),
-            amount: 9999.000012345678,
+        let transfer_amount = U256::from(100);
+        let transfer_to_args = TransferToArgs {
+            account: bob.to_string(),
+            symbol: symbol.clone(),
+            amount: transfer_amount.to_string(),
         };
-        let mocker = mock::MockCanisterCaller::new(|canister, method, args| {
-            if method == "icrc1_balance_of" {
-                return encode_args((Nat::from(999900001234u64),)).unwrap();
-            }
-            assert_eq!(canister, &panda_ledger);
-            assert_eq!(method, "icrc1_transfer");
-            let (args,): (TransferArg,) = decode_args(&args).unwrap();
-            println!("{:?}", args);
-            assert_eq!(
-                args.from_subaccount,
-                Some(principal_to_subaccount(Principal::anonymous()))
-            );
-            assert_eq!(args.to.owner, Principal::anonymous());
-            assert_eq!(args.amount, Nat::from(999900001234u64));
 
-            let res: Result<Nat, TransferError> = Ok(Nat::from(321u64));
-            encode_args((res,)).unwrap()
-        });
+        let call_result = tool.call(&provider, alice, transfer_to_args, None).await.unwrap();
+        assert!(call_result.output.contains("Successful"));
 
-        let (_, res) = ledgers
-            .transfer(&mocker, Principal::anonymous(), args)
-            .await
-            .unwrap();
-        assert_eq!(res, Nat::from(321u64));
+        // // Transfer and wait for inclusion.
+        // let tx_hash = contract.transfer(bob, amount).send().await.unwrap().watch().await.unwrap();
+
+        // // Register the balances of Alice and Bob after the transfer.
+        let alice_after_balance = contract.balanceOf(alice).call().await.unwrap()._0;
+        let bob_after_balance = contract.balanceOf(bob).call().await.unwrap()._0;
+
+        // Check the balances of Alice and Bob after the transfer.
+        assert_eq!(alice_before_balance - alice_after_balance, transfer_amount);
+        assert_eq!(bob_after_balance - bob_before_balance, transfer_amount);
+
     }
 }

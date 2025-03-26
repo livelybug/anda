@@ -12,28 +12,19 @@
 //!
 //! # Examples
 //! ```rust,ignore
-//! use anda_icp::ledger::ICPLedgers;
+//! use anda_bsc::ledger::BSCLedgers;
 //! use anda_core::CanisterCaller;
 //! use std::collections::BTreeSet;
 //!
 //! async fn example(ctx: &impl CanisterCaller) {
 //!     let canisters = BTreeSet::from([Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()]);
-//!     let ledgers = ICPLedgers::load(ctx, canisters, false).await.unwrap();
+//!     let ledgers = BSCLedgers::load(ctx, canisters, false).await.unwrap();
 //!     // Use ledgers for transfers or balance queries
 //! }
 //! ```
 
-use anda_core::{BoxError, CanisterCaller};
-use candid::{Nat, Principal};
-use icrc_ledger_types::{
-    icrc::generic_metadata_value::MetadataValue,
-    icrc1::{
-        account::{Account, principal_to_subaccount},
-        transfer::{TransferArg, TransferError},
-    },
-};
-use num_traits::cast::ToPrimitive;
-use std::collections::{BTreeMap, BTreeSet};
+use anda_core::BoxError;
+use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
 
 pub mod balance;
 pub mod transfer;
@@ -41,63 +32,60 @@ pub mod transfer;
 pub use balance::*;
 pub use transfer::*;
 
-/// ICP Ledger Transfer tool implementation
+use alloy::{
+    primitives::{Address, U256}, 
+    providers::{
+        fillers::TxFiller, Network, Provider, ProviderLayer, RootProvider},
+        sol
+};
+use eyre::Result;
+
+// Codegen from artifact.
+sol!(
+    #[allow(missing_docs)]
+    #[sol(rpc)]
+    ERC20STD,
+    "artifacts/ERC20Example.json"
+);
+
+
+/// BSC Ledger Transfer tool implementation
 #[derive(Debug, Clone)]
-pub struct ICPLedgers {
+pub struct BSCLedgers {
     /// Map of token symbols to their corresponding canister ID and decimals places
-    pub ledgers: BTreeMap<String, (Principal, u8)>,
-    /// Flag indicating whether to use user-specific subaccounts for transfers
-    pub from_user_subaccount: bool,
+    pub ledgers: BTreeMap<String, (Address, u8)>,
 }
 
-impl ICPLedgers {
-    /// Creates a new ICPLedgerTransfer instance
+impl BSCLedgers {
+    /// Creates a new BSCLedgerTransfer instance
     ///
     /// # Arguments
     /// * `ctx` - Canister caller context
-    /// * `ledger_canisters` - Set of 1 to N ICP token ledger canister IDs
+    /// * `ledger_canisters` - Set of 1 to N BSC token ledger canister IDs
     /// * `from_user_subaccount` - When false, the from account is the Agent's main account.
     ///   When true, the from account is a user-specific subaccount derived from the Agent's main account.
-    pub async fn load(
-        ctx: &impl CanisterCaller,
-        ledger_canisters: BTreeSet<Principal>,
-        from_user_subaccount: bool,
-    ) -> Result<ICPLedgers, BoxError> {
-        if ledger_canisters.is_empty() {
-            return Err("No ledger canister specified".into());
+    pub async fn load<L, N, F>(
+        ctx: &F::Provider,  //  TODO: is DynProvider appicable?
+        addresses: BTreeSet<Address>,
+    ) -> Result<BSCLedgers, BoxError>
+        where
+            L: ProviderLayer<RootProvider<N>, N>,
+            F: TxFiller<N> + ProviderLayer<L::Provider, N>,
+            N: Network, 
+    {
+        if addresses.is_empty() {
+            return Err("No BSC ledger canister specified".into()); // TODO: is it token address?
         }
-        let mut ledgers = BTreeMap::new();
-        for canister in ledger_canisters {
-            let res: Vec<(String, MetadataValue)> =
-                ctx.canister_query(&canister, "icrc1_metadata", ()).await?;
-            let mut symbol = "ICP".to_string();
-            let mut decimals = -1i8;
-            for (k, v) in res {
-                match k.as_str() {
-                    // icrc1:symbol
-                    "icrc1:symbol" => {
-                        if let MetadataValue::Text(s) = v {
-                            symbol = s;
-                        }
-                    }
-                    // icrc1:decimals
-                    "icrc1:decimals" => {
-                        if let MetadataValue::Nat(n) = v {
-                            decimals = n.0.to_i8().unwrap_or(-1)
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            if decimals > -1 {
-                ledgers.insert(symbol, (canister, decimals as u8));
-            }
+        let mut ledgers: BTreeMap<String, (Address, u8)> = BTreeMap::new();
+        for address in addresses {
+            let contract = ERC20STD::new(address, ctx);
+            let symbol = contract.symbol().call().await?._0;
+            let decimals = contract.decimals().call().await?._0;
+            ledgers.insert(symbol, (address, decimals));
         }
 
-        Ok(ICPLedgers {
-            ledgers,
-            from_user_subaccount,
+        Ok(BSCLedgers {
+            ledgers
         })
     }
 
@@ -111,63 +99,50 @@ impl ICPLedgers {
     /// Result containing the ledger ID and transaction ID (Nat) or an error
     async fn transfer(
         &self,
-        ctx: &impl CanisterCaller,
-        me: Principal,
+        ctx: &impl Provider,  
+        me: Address,
         args: transfer::TransferToArgs,
-    ) -> Result<(Principal, Nat), BoxError> {
-        let owner = Principal::from_text(&args.account)?;
-        let from_subaccount = if self.from_user_subaccount {
-            Some(principal_to_subaccount(owner))
-        } else {
-            None
-        };
-        let (canister, decimals) = self
+    ) -> Result<(Address, String), BoxError> {
+        let to_addr = Address::from_str(&args.account)?;  
+        let to_amount = U256::from_str(&args.amount)?;
+
+        let (token_addr, _decimals) = self
             .ledgers
             .get(&args.symbol)
             .ok_or_else(|| format!("Token {} is not supported", args.symbol))?;
 
-        let amount = (args.amount * 10u64.pow(*decimals as u32) as f64) as u64;
-        let balance: Nat = ctx
-            .canister_query(
-                canister,
-                "icrc1_balance_of",
-                (Account {
-                    owner: me,
-                    subaccount: from_subaccount,
-                },),
-            )
-            .await?;
+        let contract = ERC20STD::new(*token_addr, ctx);
 
-        if balance < amount {
+        let balance = contract
+            .balanceOf(me)
+            .call()
+            .await?._0;
+
+        if balance < to_amount {
             return Err("insufficient balance".into());
         }
 
-        let res: Result<Nat, TransferError> = ctx
-            .canister_update(
-                canister,
-                "icrc1_transfer",
-                (TransferArg {
-                    from_subaccount,
-                    to: Account {
-                        owner,
-                        subaccount: None,
-                    },
-                    amount: amount.into(),
-                    memo: None,
-                    fee: None,
-                    created_at_time: None,
-                },),
-            )
-            .await?;
+        let res = contract.transfer(to_addr, to_amount).send().await?.watch().await;
+
         log::info!(
             account = args.account,
             symbol = args.symbol,
             amount = args.amount,
             result = res.is_ok();
-            "icrc1_transfer",
+            "{}", TransferTool::NAME,
         );
-        res.map(|v| (*canister, v))
-            .map_err(|err| format!("failed to transfer tokens, error: {:?}", err).into())
+
+        let tx_hash = match res {
+            Ok(tx_hash) => tx_hash,
+            Err(err) => {
+                return Err(format!("failed to transfer tokens, error: {:?}", err).into())
+            }
+        };
+
+        println!("Token transfer transaction: {:#?}", tx_hash);
+
+        // return the token address and amount transferred
+        Ok((*token_addr, args.amount))   
     }
 
     /// Retrieves the balance of a specific account for a given token
@@ -180,31 +155,31 @@ impl ICPLedgers {
     /// Result containing the ledger ID and token balance (f64) or an error
     async fn balance_of(
         &self,
-        ctx: &impl CanisterCaller,
+        ctx: &impl Provider,
         args: balance::BalanceOfArgs,
-    ) -> Result<(Principal, f64), BoxError> {
-        let owner = Principal::from_text(&args.account)?;
+    ) -> Result<(Address, String), BoxError>
+    {
+        let user_addr = Address::from_str(&args.account)?;  
 
-        let (canister, decimals) = self
+        let (token_addr, _decimals) = self
             .ledgers
             .get(&args.symbol)
             .ok_or_else(|| format!("Token {} is not supported", args.symbol))?;
-        let account = Account {
-            owner,
-            subaccount: None,
-        };
 
-        let res: Nat = ctx
-            .canister_query(canister, "icrc1_balance_of", (account,))
-            .await?;
+        let contract = ERC20STD::new(*token_addr, ctx);
 
-        let amount = res.0.to_f64().unwrap_or_default() / 10u64.pow(*decimals as u32) as f64;
+        let balance = contract
+            .balanceOf(user_addr)
+            .call()
+            .await?._0;
+
+        let balance = balance.to_string();
         log::info!(
             account = args.account,
             symbol = args.symbol,
-            balance = amount;
-            "balance_of",
+            balance = balance;
+            "{}", BalanceOfTool::NAME,
         );
-        Ok((*canister, amount))
+        Ok((user_addr, balance))
     }
 }
