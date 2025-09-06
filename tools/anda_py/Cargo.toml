@@ -4,8 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "anda"
-crate-type = ["cdylib"]
+name = "anda_py"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.21.2", features = ["extension-module"] }
+# Python Bindings
+pyo3 = { version = "0.21.2", features = ["extension-module", "serde"] }
+
+# Internal Workspace Crates
+anda_core = { path = "../../anda_core" }
+anda_engine = { path = "../../anda_engine" }
+
+# External Workspace Crates
+anda_db = { workspace = true }
+anda_kip = { workspace = true }
+anda_cognitive_nexus = { workspace = true }
+
+# Other Crates
+tokio = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+candid = { workspace = true }
+object_store = { workspace = true }
