@@ -19,6 +19,7 @@ anda_engine = { path = "../../anda_engine" }
 anda_db = { workspace = true }
 anda_kip = { workspace = true }
 anda_cognitive_nexus = { workspace = true }
+anda_object_store = { workspace = true }
 
 # Other Crates
 tokio = { workspace = true }

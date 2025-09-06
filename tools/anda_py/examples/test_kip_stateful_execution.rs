@@ -90,87 +90,133 @@ async fn main() {
     }
     "#;
 
-    let (_, response1) = execute_kip(medical_knowledge_kml.to_string(), json!({}), false)
-        .await
-        .expect("Execution of medical_knowledge_kml failed");
+    // Add db_config for in-memory DB
+    let db_config_in_mem = json!({
+        "store_location_type": "in_mem",
+        "DB_name": "test_medical_db",
+        "DB_desc": "Ephemeral DB for medical KIP test"
+    });
+
+    let (_, response1) = execute_kip(
+        medical_knowledge_kml.to_string(),
+        json!({}),
+        false,
+        db_config_in_mem
+    )
+    .await
+    .expect("Execution of medical_knowledge_kml failed");
     assert!(matches!(response1, Response::Ok { .. }), "Expected first KML execution to be Ok, but got {:?}", response1);
-    println!("Medical Knowledge KML executed successfully.");
+    println!("Medical Knowledge KML executed successfully (in_mem DB).");
+
+    // Add db_config for local_file DB
+    let db_config_local_file = json!({
+        "store_location_type": "local_file",
+        "store_location": "/tmp/anda_py_test_db",
+        "DB_name": "test_medical_db",
+        "DB_desc": "Local file DB for medical KIP test"
+    });
+
+    let (_, response2) = execute_kip(
+        medical_knowledge_kml.to_string(),
+        json!({}),
+        false,
+        db_config_local_file
+    )
+    .await
+    .expect("Execution of medical_knowledge_kml (local_file) failed");
+    assert!(matches!(response2, Response::Ok { .. }), "Expected second KML execution to be Ok, but got {:?}", response2);
+    println!("Medical Knowledge KML executed successfully (local_file DB).");
 /*
-        // 2. Execute the second KML command from the demo to add more data
-        println!("\n2. Executing New Drug KML...");
-        // Create a new hypothetical drug
-        let new_drug_kml = r#"
-        UPSERT {
-            CONCEPT ?brain_fog {
-                {type: "Symptom", name: "Brain Fog"}
-                SET ATTRIBUTES {
-                    description: "Mental fatigue and lack of clarity",
-                    cognitive_impact: "high"
-                }
-            }
-
-            CONCEPT ?neural_bloom {
-                {type: "Symptom", name: "Neural Bloom"}
-                SET ATTRIBUTES {
-                    description: "A rare side effect characterized by temporary burst of creative thoughts",
-                    frequency: "rare",
-                    severity: "mild"
-                }
-            }
-
-            CONCEPT ?cognizine {
-                {type: "Drug", name: "Cognizine"}
-                SET ATTRIBUTES {
-                    molecular_formula: "C12H15N5O3",
-                    risk_level: 2,
-                    description: "A novel nootropic drug designed to enhance cognitive functions",
-                    status: "experimental"
-                }
-                SET PROPOSITIONS {
-                    ("treats", {type: "Symptom", name: "Brain Fog"})
-                    ("has_side_effect", ?neural_bloom)
-                }
+    // 2. Execute the second KML command from the demo to add more data
+    println!("\n2. Executing New Drug KML...");
+    // Create a new hypothetical drug
+    let new_drug_kml = r#"
+    UPSERT {
+        CONCEPT ?brain_fog {
+            {type: "Symptom", name: "Brain Fog"}
+            SET ATTRIBUTES {
+                description: "Mental fatigue and lack of clarity",
+                cognitive_impact: "high"
             }
         }
-        WITH METADATA {
-            source: "Experimental Drug Research",
-            confidence: 0.75,
-            status: "under_review"
+
+        CONCEPT ?neural_bloom {
+            {type: "Symptom", name: "Neural Bloom"}
+            SET ATTRIBUTES {
+                description: "A rare side effect characterized by temporary burst of creative thoughts",
+                frequency: "rare",
+                severity: "mild"
+            }
         }
-        "#;
 
+        CONCEPT ?cognizine {
+            {type: "Drug", name: "Cognizine"}
+            SET ATTRIBUTES {
+                molecular_formula: "C12H15N5O3",
+                risk_level: 2,
+                description: "A novel nootropic drug designed to enhance cognitive functions",
+                status: "experimental"
+            }
+            SET PROPOSITIONS {
+                ("treats", {type: "Symptom", name: "Brain Fog"})
+                ("has_side_effect", ?neural_bloom)
+            }
+        }
+    }
+    WITH METADATA {
+        source: "Experimental Drug Research",
+        confidence: 0.75,
+        status: "under_review"
+    }
+    "#;
 
-        let (_, response2) = execute_kip(new_drug_kml.to_string(), json!({}), false)
-            .await
-            .expect("Execution of new_drug_kml failed");
-        assert!(matches!(response2, Response::Ok { .. }), "Expected second KML execution to be Ok, but got {:?}", response2);
-        println!("New Drug KML executed successfully.");
+    let (_, response3) = execute_kip(
+        new_drug_kml.to_string(),
+        json!({}),
+        false,
+        db_config_in_mem.clone() // use the same db_config
+    )
+    .await
+    .expect("Execution of new_drug_kml failed");
+    assert!(matches!(response3, Response::Ok { .. }), "Expected third KML execution to be Ok, but got {:?}", response3);
+    println!("New Drug KML executed successfully (in_mem DB).");
 
-        // 3. Execute a KQL query from the demo to verify the data
-        println!("\n3. Executing KQL Query to find all drugs...");
-        let query = r#"\
-        FIND(?drug.name, ?drug.attributes.risk_level) \
-        WHERE { \
-            ?drug {type: \"Drug\"} \
-        } \
-        ORDER BY ?drug.attributes.risk_level ASC \
-        "#;
+    let (_, response4) = execute_kip(
+        new_drug_kml.to_string(),
+        json!({}),
+        false,
+        db_config_local_file.clone() // use the same db_config
+    )
+    .await
+    .expect("Execution of new_drug_kml (local_file) failed");
+    assert!(matches!(response4, Response::Ok { .. }), "Expected fourth KML execution to be Ok, but got {:?}", response4);
+    println!("New Drug KML executed successfully (local_file DB).");
 
-        let (_, query_response) = execute_kip(query.to_string(), json!({}), false)
-            .await
-            .expect("Execution of KQL query failed");
+    // 3. Execute a KQL query from the demo to verify the data
+    println!("\n3. Executing KQL Query to find all drugs...");
+    let query = r#"\
+    FIND(?drug.name, ?drug.attributes.risk_level) \
+    WHERE { \
+        ?drug {type: \"Drug\"} \
+    } \
+    ORDER BY ?drug.attributes.risk_level ASC \
+    "#;
 
-        println!("Query Response: {:#?}", query_response);
+    let (_, query_response) = execute_kip(query.to_string(), json!({}), false)
+        .await
+        .expect("Execution of KQL query failed");
 
-        // 4. Assert that the query was successful and returned the correct data
-        assert!(matches!(query_response, Response::Ok { .. }), "Expected KQL query to be Ok, but got {:?}", query_response);
-        if let Response::Ok { result, .. } = query_response {
-            let result_array = result.as_array().expect("Result should be an array");
-            assert_eq!(result_array.len(), 2, "Expected to find 2 drugs, but found {}", result_array.len());
-            println!("Successfully found 2 drugs as expected.");
-        } else {
-            panic!("Query failed, expected Ok response");
-        }*/
+    println!("Query Response: {:#?}", query_response);
 
+    // 4. Assert that the query was successful and returned the correct data
+    assert!(matches!(query_response, Response::Ok { .. }), "Expected KQL query to be Ok, but got {:?}", query_response);
+    if let Response::Ok { result, .. } = query_response {
+        let result_array = result.as_array().expect("Result should be an array");
+        assert_eq!(result_array.len(), 2, "Expected to find 2 drugs, but found {}", result_array.len());
+        println!("Successfully found 2 drugs as expected.");
+    } else {
+        panic!("Query failed, expected Ok response");
+    }
+*/
     println!("\n--- Full Stateful KIP Execution Test Passed ---");
 }
