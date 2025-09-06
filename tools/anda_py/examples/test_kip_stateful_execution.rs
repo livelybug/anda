@@ -1,5 +1,5 @@
 use anda_kip::Response;
-use anda_py::execute_kip;
+use anda_py::{execute_kip, AndaDbConfig, StoreLocationType};
 use serde_json::json;
 
 // cargo run --example test_kip_stateful_execution
@@ -90,12 +90,14 @@ async fn main() {
     }
     "#;
 
-    // Add db_config for in-memory DB
-    let db_config_in_mem = json!({
-        "store_location_type": "in_mem",
-        "DB_name": "test_medical_db",
-        "DB_desc": "Ephemeral DB for medical KIP test"
-    });
+    // Add db_config for in-memory DB (as AndaDbConfig struct expects)
+    let db_config_in_mem = AndaDbConfig {
+        store_location_type: StoreLocationType::InMem,
+        store_location: "".to_owned(),
+        DB_name: "test_medical_db".to_string(),
+        DB_desc: Some("Ephemeral DB for medical KIP test".to_string()),
+        meta_cache_capacity: Some(10000),
+    };
 
     let (_, response1) = execute_kip(
         medical_knowledge_kml.to_string(),
@@ -108,13 +110,28 @@ async fn main() {
     assert!(matches!(response1, Response::Ok { .. }), "Expected first KML execution to be Ok, but got {:?}", response1);
     println!("Medical Knowledge KML executed successfully (in_mem DB).");
 
-    // Add db_config for local_file DB
-    let db_config_local_file = json!({
-        "store_location_type": "local_file",
-        "store_location": "/tmp/anda_py_test_db",
-        "DB_name": "test_medical_db",
-        "DB_desc": "Local file DB for medical KIP test"
-    });
+    // Add db_config for local_file DB (as AndaDbConfig struct expects)
+    let db_config_local_file = AndaDbConfig {
+        store_location_type: StoreLocationType::LocalFile,
+        store_location: "/tmp/anda_py_test_db".to_string(),
+        DB_name: "test_medical_db".to_string(),
+        DB_desc: Some("Local file DB for medical KIP test".to_string()),
+        meta_cache_capacity: Some(10000),
+    };
+
+    // Ensure store_location folder exists before calling execute_kip
+    if let StoreLocationType::LocalFile = db_config_local_file.store_location_type {
+        use std::path::Path;
+        let path = Path::new(&db_config_local_file.store_location);
+        if path.exists() {
+            if path.is_file() {
+                panic!("store_location exists but is a file, not a directory: {}", db_config_local_file.store_location);
+            }
+        } else {
+            std::fs::create_dir_all(path)
+                .expect("Failed to create store_location directory");
+        }
+    }
 
     let (_, response2) = execute_kip(
         medical_knowledge_kml.to_string(),
