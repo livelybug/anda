@@ -138,3 +138,13 @@ pub async fn execute_kip(
 
     Ok(request.execute(nexus).await)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_execute_kip_in_mem() {
+    
+    }
+}

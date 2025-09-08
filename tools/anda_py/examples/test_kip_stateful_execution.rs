@@ -3,15 +3,8 @@ use anda_kip::{Response, Json, Map};
 use anda_py::{execute_kip, create_kip_db, AndaDbConfig, StoreLocationType};
 use serde_json::json;
 
-// cargo run --example test_kip_stateful_execution
-#[tokio::main]
-async fn main() {
-    println!("--- Running Full Stateful KIP Execution Test ---");
-
-    // 1. Execute the first KML command from the demo to set up schema and initial data
-    println!("\n1. Executing Medical Knowledge KML...");
-    // Create basic concept types and medical knowledge capsule
-    let medical_knowledge_kml = r#"
+// Create basic concept types and medical knowledge capsule
+static MEDICAL_KNOWLEDGE_KML: &str = r#"
     UPSERT {
         // Define concept types
         CONCEPT ?drug_type {
@@ -91,76 +84,11 @@ async fn main() {
     }
     "#;
 
-    // Add db_config for in-memory DB (as AndaDbConfig struct expects)
-    let db_config_in_mem = AndaDbConfig {
-        store_location_type: StoreLocationType::InMem,
-        store_location: "".to_owned(),
-        DB_name: "test_medical_db".to_string(),
-        DB_desc: Some("Ephemeral DB for medical KIP test".to_string()),
-        meta_cache_capacity: Some(10000),
-    };
-
-    // Create Nexus instance for in-memory DB
-    let nexus_in_mem = create_kip_db(db_config_in_mem).await.expect("Failed to create in_mem Nexus");
-
-    // Use empty Map for parameters
-    let empty_params: Map<String, Json> = Map::new();
-
-    let (_, response1) = execute_kip(
-        nexus_in_mem.as_ref(),
-        medical_knowledge_kml.to_string(),
-        Some(empty_params.clone()),
-        false,
-    )
-    .await
-    .expect("Execution of medical_knowledge_kml failed");
-    assert!(matches!(response1, Response::Ok { .. }), "Expected first KML execution to be Ok, but got {:?}", response1);
-    println!("Medical Knowledge KML executed successfully (in_mem DB).");
-
-    // Add db_config for local_file DB (as AndaDbConfig struct expects)
-    let db_config_local_file = AndaDbConfig {
-        store_location_type: StoreLocationType::LocalFile,
-        store_location: "/tmp/anda_py_test_db".to_string(),
-        DB_name: "test_medical_db".to_string(),
-        DB_desc: Some("Local file DB for medical KIP test".to_string()),
-        meta_cache_capacity: Some(10000),
-    };
-
-    // Ensure store_location folder exists before calling create_kip_db
-    if let StoreLocationType::LocalFile = db_config_local_file.store_location_type {
-        use std::path::Path;
-        let path = Path::new(&db_config_local_file.store_location);
-        if path.exists() {
-            if path.is_file() {
-                panic!("store_location exists but is a file, not a directory: {}", db_config_local_file.store_location);
-            }
-        } else {
-            std::fs::create_dir_all(path)
-                .expect("Failed to create store_location directory");
-        }
-    }
-
-    // Create Nexus instance for local_file DB
-    let nexus_local_file = create_kip_db(db_config_local_file).await.expect("Failed to create local_file Nexus");
-
-    let (_, response2) = execute_kip(
-        nexus_local_file.as_ref(),
-        medical_knowledge_kml.to_string(),
-        Some(empty_params.clone()),
-        false,
-    )
-    .await
-    .expect("Execution of medical_knowledge_kml (local_file) failed");
-    assert!(matches!(response2, Response::Ok { .. }), "Expected second KML execution to be Ok, but got {:?}", response2);
-    println!("Medical Knowledge KML executed successfully (local_file DB).");
-/*
-    // 2. Execute the second KML command from the demo to add more data
-    println!("\n2. Executing New Drug KML...");
-    // Create a new hypothetical drug
-    let new_drug_kml = r#"
+// Create a new hypothetical drug
+static NEW_DRUG_KML: &str = r#"
     UPSERT {
         CONCEPT ?brain_fog {
-            {type: "Symptom", name: "Brain Fog"}
+            {type: "Symptom", name: $symptom_name}
             SET ATTRIBUTES {
                 description: "Mental fatigue and lack of clarity",
                 cognitive_impact: "high"
@@ -197,17 +125,97 @@ async fn main() {
     }
     "#;
 
-    let (_, response3) = execute_kip(
-        new_drug_kml.to_string(),
+// cargo run --example test_kip_stateful_execution
+#[tokio::main]
+async fn main() {
+    println!("--- Running Full Stateful KIP Execution Test ---");
+
+    // 1. Execute the first KML command from the demo to set up schema and initial data
+    println!("\n1. Executing Medical Knowledge KML...");
+
+    // Add db_config for in-memory DB (as AndaDbConfig struct expects)
+    let db_config_in_mem = AndaDbConfig {
+        store_location_type: StoreLocationType::InMem,
+        store_location: "".to_owned(),
+        DB_name: "test_medical_db".to_string(),
+        DB_desc: Some("Ephemeral DB for medical KIP test".to_string()),
+        meta_cache_capacity: Some(10000),
+    };
+
+    // Create Nexus instance for in-memory DB
+    let nexus_in_mem = create_kip_db(db_config_in_mem).await.expect("Failed to create in_mem Nexus");
+
+    // Use empty Map for parameters
+    let empty_params: Map<String, Json> = Map::new();
+
+    let (_, response1) = execute_kip(
+        nexus_in_mem.as_ref(),
+        MEDICAL_KNOWLEDGE_KML.to_string(),
         Some(empty_params.clone()),
         false,
-        db_config_in_mem.clone() // use the same db_config
+    )
+    .await
+    .expect("Execution of medical_knowledge_kml failed");
+    assert!(matches!(response1, Response::Ok { .. }), "Expected first KML execution to be Ok, but got {:?}", response1);
+    println!("Medical Knowledge KML executed successfully (in_mem DB).");
+
+    // Add db_config for local_file DB (as AndaDbConfig struct expects)
+    let db_config_local_file = AndaDbConfig {
+        store_location_type: StoreLocationType::LocalFile,
+        store_location: "/tmp/anda_py_test_db".to_string(),
+        DB_name: "test_medical_db".to_string(),
+        DB_desc: Some("Local file DB for medical KIP test".to_string()),
+        meta_cache_capacity: Some(10000),
+    };
+
+    // Ensure store_location folder exists before calling create_kip_db
+    if let StoreLocationType::LocalFile = db_config_local_file.store_location_type {
+        use std::path::Path;
+        let path = Path::new(&db_config_local_file.store_location);
+        if path.exists() {
+            if path.is_file() {
+                panic!("store_location exists but is a file, not a directory: {}", db_config_local_file.store_location);
+            }
+        } else {
+            std::fs::create_dir_all(path)
+                .expect("Failed to create store_location directory");
+        }
+    }
+
+    // Create Nexus instance for local_file DB
+    let nexus_local_file = create_kip_db(db_config_local_file).await.expect("Failed to create local_file Nexus");
+
+    let (_, response2) = execute_kip(
+        nexus_local_file.as_ref(),
+        MEDICAL_KNOWLEDGE_KML.to_string(),
+        Some(empty_params.clone()),
+        false,
+    )
+    .await
+    .expect("Execution of medical_knowledge_kml (local_file) failed");
+    assert!(matches!(response2, Response::Ok { .. }), "Expected second KML execution to be Ok, but got {:?}", response2);
+    println!("Medical Knowledge KML executed successfully (local_file DB).");
+
+    // 2. Execute the second KML command from the demo to add more data
+    println!("\n2. Executing New Drug KML...");
+
+    let mut ql_parameters = Map::new();
+    ql_parameters.insert(
+        "symptom_name".to_string(),
+        Json::String("Brain Fog".to_string()),
+    );
+
+    let (_, response1_2) = execute_kip(
+        nexus_in_mem.as_ref(),
+        NEW_DRUG_KML.to_string(),
+        Some(ql_parameters.clone()),
+        false,
     )
     .await
     .expect("Execution of new_drug_kml failed");
-    assert!(matches!(response3, Response::Ok { .. }), "Expected third KML execution to be Ok, but got {:?}", response3);
+    assert!(matches!(response1_2, Response::Ok { .. }), "Expected third KML execution to be Ok, but got {:?}", response1_2);
     println!("New Drug KML executed successfully (in_mem DB).");
-
+/*
     let (_, response4) = execute_kip(
         new_drug_kml.to_string(),
         empty_params.clone(),
@@ -218,18 +226,22 @@ async fn main() {
     .expect("Execution of new_drug_kml (local_file) failed");
     assert!(matches!(response4, Response::Ok { .. }), "Expected fourth KML execution to be Ok, but got {:?}", response4);
     println!("New Drug KML executed successfully (local_file DB).");
-
+*/
     // 3. Execute a KQL query from the demo to verify the data
     println!("\n3. Executing KQL Query to find all drugs...");
-    let query = r#"\
-    FIND(?drug.name, ?drug.attributes.risk_level) \
-    WHERE { \
-        ?drug {type: \"Drug\"} \
-    } \
-    ORDER BY ?drug.attributes.risk_level ASC \
+    let query = r#"
+    FIND(?drug.name, ?drug.attributes.molecular_formula, ?drug.attributes.risk_level)
+    WHERE {
+        ?drug {type: "Drug"}
+    }
+    ORDER BY ?drug.attributes.risk_level ASC
     "#;
 
-    let (_, query_response) = execute_kip(query.to_string(), empty_params.clone(), false)
+    let (_, query_response) = execute_kip(
+        nexus_in_mem.as_ref(),
+        query.to_string(), 
+        None, 
+        false)
         .await
         .expect("Execution of KQL query failed");
 
@@ -237,6 +249,7 @@ async fn main() {
 
     // 4. Assert that the query was successful and returned the correct data
     assert!(matches!(query_response, Response::Ok { .. }), "Expected KQL query to be Ok, but got {:?}", query_response);
+
     if let Response::Ok { result, .. } = query_response {
         let result_array = result.as_array().expect("Result should be an array");
         assert_eq!(result_array.len(), 2, "Expected to find 2 drugs, but found {}", result_array.len());
@@ -244,6 +257,6 @@ async fn main() {
     } else {
         panic!("Query failed, expected Ok response");
     }
-*/
+
     println!("\n--- Full Stateful KIP Execution Test Passed ---");
 }
