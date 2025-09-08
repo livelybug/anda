@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use anda_kip::{Response, Json, Map};
-use anda_py::{execute_kip, AndaDbConfig, StoreLocationType};
+use anda_py::{execute_kip, create_kip_db, AndaDbConfig, StoreLocationType};
 use serde_json::json;
 
 // cargo run --example test_kip_stateful_execution
@@ -100,14 +100,17 @@ async fn main() {
         meta_cache_capacity: Some(10000),
     };
 
+    // Create Nexus instance for in-memory DB
+    let nexus_in_mem = create_kip_db(db_config_in_mem).await.expect("Failed to create in_mem Nexus");
+
     // Use empty Map for parameters
     let empty_params: Map<String, Json> = Map::new();
 
     let (_, response1) = execute_kip(
+        nexus_in_mem.as_ref(),
         medical_knowledge_kml.to_string(),
-        Some(empty_params.clone()), // pass Some(...)
+        Some(empty_params.clone()),
         false,
-        db_config_in_mem
     )
     .await
     .expect("Execution of medical_knowledge_kml failed");
@@ -123,7 +126,7 @@ async fn main() {
         meta_cache_capacity: Some(10000),
     };
 
-    // Ensure store_location folder exists before calling execute_kip
+    // Ensure store_location folder exists before calling create_kip_db
     if let StoreLocationType::LocalFile = db_config_local_file.store_location_type {
         use std::path::Path;
         let path = Path::new(&db_config_local_file.store_location);
@@ -137,11 +140,14 @@ async fn main() {
         }
     }
 
+    // Create Nexus instance for local_file DB
+    let nexus_local_file = create_kip_db(db_config_local_file).await.expect("Failed to create local_file Nexus");
+
     let (_, response2) = execute_kip(
+        nexus_local_file.as_ref(),
         medical_knowledge_kml.to_string(),
-        Some(empty_params.clone()), // pass Some(...)
+        Some(empty_params.clone()),
         false,
-        db_config_local_file
     )
     .await
     .expect("Execution of medical_knowledge_kml (local_file) failed");
@@ -193,7 +199,7 @@ async fn main() {
 
     let (_, response3) = execute_kip(
         new_drug_kml.to_string(),
-        empty_params.clone(),
+        Some(empty_params.clone()),
         false,
         db_config_in_mem.clone() // use the same db_config
     )

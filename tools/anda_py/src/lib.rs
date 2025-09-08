@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use anda_object_store::{MetaStore, MetaStoreBuilder};
 use anda_kip::Json;
+use anda_kip::executor::Executor;
 
 /// Formats the sum of two numbers as a string.
 #[pyfunction]
@@ -63,43 +64,17 @@ impl AndaDbConfig {
     }
 }
 
-/// Executes a KIP command using the Anda cognitive engine.
-///
-/// # Arguments
-///
-/// * `command` - The KIP command string to execute (KML/KQL/META).
-/// * `parameters` - An optional map of command parameters (`Option<Map<String, Json>>`). If `None`, treated as empty.
-/// * `dry_run` - If true, performs a dry run without committing changes.
-/// * `db_config` - Database configuration as an `AndaDbConfig` struct.
-///     - `store_location_type`: `"InMem"` for in-memory DB, `"LocalFile"` for file-backed DB.
-///     - `store_location`: Required if `store_location_type` is `"LocalFile"`.
-///     - `DB_name`: Name of the database.
-///     - `DB_desc`: Optional description of the database.
-///     - `meta_cache_capacity`: Optional cache capacity for metadata (default: 10000).
-///
-/// # Returns
-///
-/// Returns a tuple of the command type and the response on success, or a boxed error on failure.
+/// Create a CognitiveNexus instance from AndaDbConfig.
+/// Returns an Arc-wrapped Nexus for use in KIP execution.
 ///
 /// # Errors
-///
-/// Returns an error if the database configuration is invalid, required fields are missing,
-/// if the parameters are not a map, or if the KIP command execution fails.
-///
-/// # Example
-/// 
-/// Refer to tools/anda_py/examples directory
-pub async fn execute_kip(
-    command: String,
-    parameters: Option<Map<String, Json>>, // changed type
-    dry_run: bool,
+/// Returns an error if the config is invalid or DB/Nexus creation fails.
+pub async fn create_kip_db(
     db_config: AndaDbConfig,
-) -> Result<(CommandType, Response), BoxError> {
-    // Verify db_config before proceeding
+) -> Result<Arc<CognitiveNexus>, BoxError> {
     db_config.verify_config()
         .map_err(|e| KipError::Execution(e))?;
 
-    // Parse and validate db_config
     let db_name = db_config.DB_name.as_str();
     let db_desc = db_config.DB_desc.as_deref().unwrap_or_default();
     let meta_cache_capacity = db_config.meta_cache_capacity.unwrap_or(10000);
@@ -116,7 +91,6 @@ pub async fn execute_kip(
         }
     };
 
-    // Setup DB config
     let db_config = DBConfig {
         name: db_name.to_string(),
         description: db_desc.to_string(),
@@ -125,9 +99,35 @@ pub async fn execute_kip(
 
     let db = Arc::new(AndaDB::connect(object_store, db_config).await?);
     let nexus = Arc::new(CognitiveNexus::connect(db, async |_| Ok(())).await?);
+    Ok(nexus)
+}
 
-    // 2. Create a KIP Request
-    // Use empty map if parameters is None
+/// Executes a KIP command using an existing Executor instance.
+///
+/// # Arguments
+///
+/// * `nexus` - Reference to an Executor instance (`&(impl Executor + Sync)`).
+/// * `command` - The KIP command string to execute (KML/KQL/META).
+/// * `parameters` - An optional map of command parameters (`Option<Map<String, Json>>`). If `None`, treated as empty.
+/// * `dry_run` - If true, performs a dry run without committing changes.
+///
+/// # Returns
+///
+/// Returns a tuple of the command type and the response on success, or a boxed error on failure.
+///
+/// # Errors
+///
+/// Returns an error if the KIP command execution fails.
+///
+/// # Example
+/// 
+/// Refer to tools/anda_py/examples directory
+pub async fn execute_kip(
+    nexus: &(impl Executor + Sync),
+    command: String,
+    parameters: Option<Map<String, Json>>,
+    dry_run: bool,
+) -> Result<(CommandType, Response), BoxError> {
     let params_map = parameters.unwrap_or_default();
 
     let request = Request {
@@ -136,6 +136,5 @@ pub async fn execute_kip(
         dry_run,
     };
 
-    // 3. Execute the request using its own method
-    Ok(request.execute(nexus.as_ref()).await)
+    Ok(request.execute(nexus).await)
 }
