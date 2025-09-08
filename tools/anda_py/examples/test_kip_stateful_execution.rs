@@ -1,4 +1,5 @@
-use anda_kip::Response;
+use std::collections::HashMap;
+use anda_kip::{Response, Json, Map};
 use anda_py::{execute_kip, AndaDbConfig, StoreLocationType};
 use serde_json::json;
 
@@ -99,9 +100,12 @@ async fn main() {
         meta_cache_capacity: Some(10000),
     };
 
+    // Use empty Map for parameters
+    let empty_params: Map<String, Json> = Map::new();
+
     let (_, response1) = execute_kip(
         medical_knowledge_kml.to_string(),
-        json!({}),
+        Some(empty_params.clone()), // pass Some(...)
         false,
         db_config_in_mem
     )
@@ -135,7 +139,7 @@ async fn main() {
 
     let (_, response2) = execute_kip(
         medical_knowledge_kml.to_string(),
-        json!({}),
+        Some(empty_params.clone()), // pass Some(...)
         false,
         db_config_local_file
     )
@@ -189,7 +193,7 @@ async fn main() {
 
     let (_, response3) = execute_kip(
         new_drug_kml.to_string(),
-        json!({}),
+        empty_params.clone(),
         false,
         db_config_in_mem.clone() // use the same db_config
     )
@@ -200,7 +204,7 @@ async fn main() {
 
     let (_, response4) = execute_kip(
         new_drug_kml.to_string(),
-        json!({}),
+        empty_params.clone(),
         false,
         db_config_local_file.clone() // use the same db_config
     )
@@ -219,7 +223,7 @@ async fn main() {
     ORDER BY ?drug.attributes.risk_level ASC \
     "#;
 
-    let (_, query_response) = execute_kip(query.to_string(), json!({}), false)
+    let (_, query_response) = execute_kip(query.to_string(), empty_params.clone(), false)
         .await
         .expect("Execution of KQL query failed");
 

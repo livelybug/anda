@@ -7,8 +7,10 @@ use object_store::memory::InMemory;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 use anda_object_store::{MetaStore, MetaStoreBuilder};
+use anda_kip::Json;
 
 /// Formats the sum of two numbers as a string.
 #[pyfunction]
@@ -66,7 +68,7 @@ impl AndaDbConfig {
 /// # Arguments
 ///
 /// * `command` - The KIP command string to execute (KML/KQL/META).
-/// * `parameters` - A JSON value containing command parameters.
+/// * `parameters` - An optional map of command parameters (`Option<Map<String, Json>>`). If `None`, treated as empty.
 /// * `dry_run` - If true, performs a dry run without committing changes.
 /// * `db_config` - Database configuration as an `AndaDbConfig` struct.
 ///     - `store_location_type`: `"InMem"` for in-memory DB, `"LocalFile"` for file-backed DB.
@@ -82,14 +84,14 @@ impl AndaDbConfig {
 /// # Errors
 ///
 /// Returns an error if the database configuration is invalid, required fields are missing,
-/// or if the KIP command execution fails.
+/// if the parameters are not a map, or if the KIP command execution fails.
 ///
 /// # Example
 /// 
 /// Refer to tools/anda_py/examples directory
 pub async fn execute_kip(
     command: String,
-    parameters: Value, // Map<String, Json>, pub type Json = serde_json::Value;
+    parameters: Option<Map<String, Json>>, // changed type
     dry_run: bool,
     db_config: AndaDbConfig,
 ) -> Result<(CommandType, Response), BoxError> {
@@ -125,11 +127,8 @@ pub async fn execute_kip(
     let nexus = Arc::new(CognitiveNexus::connect(db, async |_| Ok(())).await?);
 
     // 2. Create a KIP Request
-    let params_map: Map<String, Value> = if let Value::Object(map) = parameters {
-        map
-    } else {
-        Map::new()
-    };
+    // Use empty map if parameters is None
+    let params_map = parameters.unwrap_or_default();
 
     let request = Request {
         command,
